@@ -1,4 +1,3 @@
-# backend/db.py
 import pymysql
 from pymysql.cursors import DictCursor
 from backend.config import DB_CONFIG

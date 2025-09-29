@@ -7,11 +7,12 @@ def hash_password(plain: str) -> bytes:
 def verify_password(plain: str, hashed: bytes) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed)
 
-def signup(username: str, email: str, password: str, role: str = "user"):
+def admin_create_user(username, name, department, email, password, shift_start_time="09:00:00"):
     if get_user_by_username_or_email(username) or get_user_by_username_or_email(email):
         raise ValueError("Username or email already exists.")
     pwd_hash = hash_password(password)
-    return insert_user(username, email, pwd_hash, role)
+    return insert_user(username, name, department, email, pwd_hash, role="user",
+                       shift_start_time=shift_start_time, shift_duration_seconds=32400)
 
 def login(login_text: str, password: str):
     user = get_user_by_username_or_email(login_text)

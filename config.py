@@ -1,17 +1,29 @@
 import os
 
-# For simplicity, hardcode; or load from env (os.getenv)
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "127.0.0.1"),   # XAMPP default
+    "host": os.getenv("DB_HOST", "127.0.0.1"),
     "port": int(os.getenv("DB_PORT", "3306")),
     "user": os.getenv("DB_USER", "root"),
-    "password": os.getenv("DB_PASSWORD", ""),    # XAMPP often empty by default
+    "password": os.getenv("DB_PASSWORD", ""),
     "database": os.getenv("DB_NAME", "idle_tracker_db"),
 }
 
-# Single admin bootstrap (used once if missing)
+# One admin
 ADMIN_BOOTSTRAP = {
     "username": os.getenv("ADMIN_USERNAME", "admin"),
     "email": os.getenv("ADMIN_EMAIL", "admin@example.com"),
     "password": os.getenv("ADMIN_PASSWORD", "admin123"),
+    "name": os.getenv("ADMIN_NAME", "System Admin"),
+    "department": os.getenv("ADMIN_DEPT", "IT"),
+    "shift_start_time": os.getenv("ADMIN_SHIFT", "09:00:00"),
+}
+
+# Email – fill these with your SMTP/app-password
+SMTP_CONFIG = {
+    "host": os.getenv("SMTP_HOST", "smtp.gmail.com"),
+    "port": int(os.getenv("SMTP_PORT", "587")),
+    "username": os.getenv("SMTP_USER", "your_email@gmail.com"),
+    "password": os.getenv("SMTP_PASS", "your_app_password"),
+    "from_addr": os.getenv("SMTP_FROM", "your_email@gmail.com"),
+    "use_tls": True,
 }
