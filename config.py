@@ -22,9 +22,9 @@ ADMIN_BOOTSTRAP = {
 SMTP_CONFIG = {
     "host": os.getenv("SMTP_HOST", "smtp.gmail.com"),
     "port": int(os.getenv("SMTP_PORT", "587")),
-    "username": os.getenv("SMTP_USER", "your_email@gmail.com"),
-    "password": os.getenv("SMTP_PASS", "your_app_password"),
-    "from_addr": os.getenv("SMTP_FROM", "your_email@gmail.com"),
+    "username": os.getenv("SMTP_USER", "usmandeveloper07@gmail.com"),
+    "password": os.getenv("SMTP_PASS", "xkmh msgm icty jsqz"),
+    "from_addr": os.getenv("SMTP_FROM", "usmandeveloper07@gmail.com"),
     "use_tls": True,
 }
 

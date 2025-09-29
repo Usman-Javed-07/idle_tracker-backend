@@ -272,3 +272,23 @@ def fetch_recordings_for_user(user_id, limit=20):
     """, (user_id, limit))
     rows = cur.fetchall(); cur.close(); conn.close()
     return rows
+
+def list_admin_emails():
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT email FROM users WHERE role='admin' AND email IS NOT NULL AND email <> ''")
+        rows = cur.fetchall()
+        # rows can be dicts or tuples depending on cursor; handle both
+        emails = []
+        for r in rows:
+            if isinstance(r, dict):
+                em = r.get("email")
+            else:
+                # assume single column
+                em = r[0] if len(r) > 0 else None
+            if em:
+                emails.append(em)
+        return emails
+    finally:
+        cur.close(); conn.close()
+
