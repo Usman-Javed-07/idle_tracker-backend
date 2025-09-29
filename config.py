@@ -27,3 +27,12 @@ SMTP_CONFIG = {
     "from_addr": os.getenv("SMTP_FROM", "your_email@gmail.com"),
     "use_tls": True,
 }
+
+
+# Where media files are written on disk
+MEDIA_ROOT = os.getenv("MEDIA_ROOT", os.path.join(os.getcwd(), "media"))
+MEDIA_SCREENSHOTS_DIR = os.path.join(MEDIA_ROOT, "screenshots")
+MEDIA_RECORDINGS_DIR = os.path.join(MEDIA_ROOT, "recordings")
+
+# Public URL base for the Flask static server below
+MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "http://127.0.0.1:5000/media")

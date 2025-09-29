@@ -1,7 +1,10 @@
+import os, uuid, datetime as dt
 from backend.db import get_connection
+from backend.config import (
+    MEDIA_ROOT, MEDIA_SCREENSHOTS_DIR, MEDIA_RECORDINGS_DIR, MEDIA_BASE_URL
+)
 
 def init_tables():
-    # safe to call on every start
     conn = get_connection(); cur = conn.cursor()
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
@@ -27,6 +30,29 @@ def init_tables():
       notified TINYINT(1) NOT NULL DEFAULT 0,
       active_duration_seconds INT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB;""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS screenshots (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      event_id BIGINT NULL,
+      taken_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      mime VARCHAR(64) NOT NULL DEFAULT 'image/png',
+      image LONGBLOB NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (event_id) REFERENCES activity_events(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB;""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS screen_recordings (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      event_id BIGINT NULL,
+      recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      duration_seconds INT NOT NULL,
+      mime VARCHAR(64) NOT NULL DEFAULT 'video/mp4',
+      video LONGBLOB NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (event_id) REFERENCES activity_events(id) ON DELETE SET NULL
     ) ENGINE=InnoDB;""")
     cur.close(); conn.close()
 
@@ -57,9 +83,21 @@ def get_user_by_id(user_id):
     cur.close(); conn.close()
     return row
 
-def list_users():
+def list_users(search=None):
     conn = get_connection(); cur = conn.cursor()
-    cur.execute("SELECT id, username, name, department, email, status, shift_start_time, shift_duration_seconds FROM users ORDER BY name")
+    if search:
+        like = f"%{search}%"
+        cur.execute("""
+          SELECT id, username, name, department, email, status, shift_start_time, shift_duration_seconds
+          FROM users
+          WHERE username LIKE %s OR name LIKE %s OR department LIKE %s
+          ORDER BY name
+        """, (like, like, like))
+    else:
+        cur.execute("""
+          SELECT id, username, name, department, email, status, shift_start_time, shift_duration_seconds
+          FROM users ORDER BY name
+        """)
     rows = cur.fetchall()
     cur.close(); conn.close()
     return rows
@@ -99,17 +137,138 @@ def mark_event_notified(event_id):
     cur.execute("UPDATE activity_events SET notified=1 WHERE id=%s", (event_id,))
     cur.close(); conn.close()
 
-def fetch_user_inactive_history(user_id, limit=200):
+def fetch_user_inactive_history(user_id, start_date=None, end_date=None, limit=300):
+    conn = get_connection(); cur = conn.cursor()
+    if start_date and end_date:
+        cur.execute("""
+            SELECT ae.id, u.username, u.email, ae.event_type, ae.occurred_at, ae.notified,
+                   ae.active_duration_seconds
+            FROM activity_events ae
+            JOIN users u ON u.id = ae.user_id
+            WHERE ae.user_id=%s AND ae.event_type='inactive'
+              AND DATE(ae.occurred_at) BETWEEN %s AND %s
+            ORDER BY ae.occurred_at DESC
+            LIMIT %s
+        """, (user_id, start_date, end_date, limit))
+    else:
+        cur.execute("""
+            SELECT ae.id, u.username, u.email, ae.event_type, ae.occurred_at, ae.notified,
+                   ae.active_duration_seconds
+            FROM activity_events ae
+            JOIN users u ON u.id = ae.user_id
+            WHERE ae.user_id=%s AND ae.event_type='inactive'
+            ORDER BY ae.occurred_at DESC
+            LIMIT %s
+        """, (user_id, limit))
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return rows
+
+# --- Screenshots & recordings
+def insert_screenshot(user_id, image_bytes, event_id=None, mime="image/png"):
     conn = get_connection(); cur = conn.cursor()
     cur.execute("""
-        SELECT ae.id, u.username, u.email, ae.event_type, ae.occurred_at, ae.notified,
-               ae.active_duration_seconds
-        FROM activity_events ae
-        JOIN users u ON u.id = ae.user_id
-        WHERE ae.user_id=%s AND ae.event_type='inactive'
-        ORDER BY ae.occurred_at DESC
-        LIMIT %s
+        INSERT INTO screenshots (user_id, event_id, mime, image) VALUES (%s,%s,%s,%s)
+    """, (user_id, event_id, mime, image_bytes))
+    sid = cur.lastrowid
+    cur.close(); conn.close()
+    return sid
+
+def insert_recording(user_id, video_bytes, duration_seconds, event_id=None, mime="video/mp4"):
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO screen_recordings (user_id, event_id, duration_seconds, mime, video)
+        VALUES (%s,%s,%s,%s,%s)
+    """, (user_id, event_id, duration_seconds, mime, video_bytes))
+    rid = cur.lastrowid
+    cur.close(); conn.close()
+    return rid
+
+def fetch_screenshots_for_user(user_id, limit=50):
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("""
+      SELECT id, user_id, event_id, taken_at, mime
+      FROM screenshots WHERE user_id=%s ORDER BY taken_at DESC LIMIT %s
     """, (user_id, limit))
     rows = cur.fetchall()
     cur.close(); conn.close()
+    return rows
+
+def fetch_recordings_for_user(user_id, limit=20):
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("""
+      SELECT id, user_id, event_id, recorded_at, duration_seconds, mime
+      FROM screen_recordings WHERE user_id=%s ORDER BY recorded_at DESC LIMIT %s
+    """, (user_id, limit))
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return rows
+
+def _ensure_media_dirs():
+    os.makedirs(MEDIA_SCREENSHOTS_DIR, exist_ok=True)
+    os.makedirs(MEDIA_RECORDINGS_DIR, exist_ok=True)
+
+def _now_stamp():
+    return dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+def insert_screenshot_url(user_id, image_bytes, event_id=None, mime="image/png"):
+    """
+    Write PNG to disk, return DB row id. Stores URL in DB.
+    """
+    _ensure_media_dirs()
+    name = f"{_now_stamp()}_{uuid.uuid4().hex}.png"
+    relpath = os.path.join("screenshots", name)
+    abspath = os.path.join(MEDIA_ROOT, relpath)
+
+    with open(abspath, "wb") as f:
+        f.write(image_bytes)
+
+    url = f"{MEDIA_BASE_URL}/{relpath.replace(os.sep, '/')}"
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO screenshots (user_id, event_id, url, mime)
+        VALUES (%s,%s,%s,%s)
+    """, (user_id, event_id, url, mime))
+    sid = cur.lastrowid
+    cur.close(); conn.close()
+    return sid, url
+
+def insert_recording_url(user_id, video_bytes, duration_seconds, event_id=None, mime="video/mp4"):
+    """
+    Write MP4 to disk, return DB row id. Stores URL in DB.
+    """
+    _ensure_media_dirs()
+    name = f"{_now_stamp()}_{uuid.uuid4().hex}.mp4"
+    relpath = os.path.join("recordings", name)
+    abspath = os.path.join(MEDIA_ROOT, relpath)
+
+    with open(abspath, "wb") as f:
+        f.write(video_bytes)
+
+    url = f"{MEDIA_BASE_URL}/{relpath.replace(os.sep, '/')}"
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO screen_recordings (user_id, event_id, duration_seconds, url, mime)
+        VALUES (%s,%s,%s,%s,%s)
+    """, (user_id, event_id, duration_seconds, url, mime))
+    rid = cur.lastrowid
+    cur.close(); conn.close()
+    return rid, url
+
+def fetch_screenshots_for_user(user_id, limit=50):
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("""
+      SELECT id, user_id, event_id, taken_at, mime, url
+      FROM screenshots WHERE user_id=%s ORDER BY taken_at DESC LIMIT %s
+    """, (user_id, limit))
+    rows = cur.fetchall(); cur.close(); conn.close()
+    return rows
+
+def fetch_recordings_for_user(user_id, limit=20):
+    conn = get_connection(); cur = conn.cursor()
+    cur.execute("""
+      SELECT id, user_id, event_id, recorded_at, duration_seconds, mime, url
+      FROM screen_recordings WHERE user_id=%s ORDER BY recorded_at DESC LIMIT %s
+    """, (user_id, limit))
+    rows = cur.fetchall(); cur.close(); conn.close()
     return rows
