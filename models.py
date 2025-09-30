@@ -9,7 +9,6 @@ from backend.config import (
 # Helpers
 # -----------------------------
 def _has_column(table: str, column: str) -> bool:
-    """Return True if `table`.`column` exists."""
     conn = get_connection(); cur = conn.cursor()
     cur.execute(f"SHOW COLUMNS FROM {table} LIKE %s", (column,))
     ok = cur.fetchone() is not None
@@ -45,7 +44,6 @@ def init_tables():
       last_status_change TIMESTAMP NULL DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB;""")
-    # Add missing shift_end_time (migration)
     if not _has_column("users", "shift_end_time"):
         cur.execute("ALTER TABLE users ADD COLUMN shift_end_time TIME NOT NULL DEFAULT '18:00:00'")
 
@@ -61,7 +59,7 @@ def init_tables():
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB;""")
 
-    # SCREENSHOTS (URL-based; keep compatible with earlier blob schema)
+    # SCREENSHOTS
     cur.execute("""
     CREATE TABLE IF NOT EXISTS screenshots (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -76,7 +74,7 @@ def init_tables():
     if not _has_column("screenshots", "url"):
         cur.execute("ALTER TABLE screenshots ADD COLUMN url TEXT")
 
-    # RECORDINGS (URL-based; keep compatible with earlier blob schema)
+    # RECORDINGS
     cur.execute("""
     CREATE TABLE IF NOT EXISTS screen_recordings (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -92,7 +90,7 @@ def init_tables():
     if not _has_column("screen_recordings", "url"):
         cur.execute("ALTER TABLE screen_recordings ADD COLUMN url TEXT")
 
-    # OVERTIME
+    # OVERTIME (kept as-is; admin sums per period)
     cur.execute("""
     CREATE TABLE IF NOT EXISTS user_overtimes (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -156,23 +154,31 @@ def get_user_by_id(user_id):
     cur.close(); conn.close()
     return row
 
-def list_users(search=None):
+def list_users(search=None, status=None, hide_admin=True):
+    """
+    Returns user cards for dashboard. Optional text search and status filter.
+    If hide_admin=True, excludes role='admin'.
+    """
     conn = get_connection(); cur = conn.cursor()
+    clauses = []
+    vals = []
+    if hide_admin:
+        clauses.append("role <> 'admin'")
     if search:
+        clauses.append("(username LIKE %s OR name LIKE %s OR department LIKE %s OR email LIKE %s)")
         like = f"%{search}%"
-        cur.execute("""
-          SELECT id, username, name, department, email, status,
-                 shift_start_time, shift_end_time, shift_duration_seconds
-          FROM users
-          WHERE username LIKE %s OR name LIKE %s OR department LIKE %s
-          ORDER BY name
-        """, (like, like, like))
-    else:
-        cur.execute("""
-          SELECT id, username, name, department, email, status,
-                 shift_start_time, shift_end_time, shift_duration_seconds
-          FROM users ORDER BY name
-        """)
+        vals.extend([like, like, like, like])
+    if status and status in {"off","shift_start","active","inactive"}:
+        clauses.append("status = %s")
+        vals.append(status)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    cur.execute(f"""
+      SELECT id, username, name, department, email, status, role,
+             shift_start_time, shift_end_time, shift_duration_seconds
+      FROM users
+      {where}
+      ORDER BY name
+    """, tuple(vals))
     rows = cur.fetchall()
     cur.close(); conn.close()
     return rows
@@ -183,7 +189,7 @@ def update_user_status(user_id, status):
     cur.close(); conn.close()
 
 # -----------------------------
-# Events
+# Events & History
 # -----------------------------
 def record_event(user_id, event_type, active_duration_seconds=None, notified=0):
     conn = get_connection(); cur = conn.cursor()
@@ -214,7 +220,10 @@ def mark_event_notified(event_id):
     cur.execute("UPDATE activity_events SET notified=1 WHERE id=%s", (event_id,))
     cur.close(); conn.close()
 
-def fetch_user_inactive_history(user_id, start_date=None, end_date=None, limit=300):
+def fetch_user_inactive_history(user_id, start_date=None, end_date=None, limit=500):
+    """
+    Returns inactive events for user within optional date bounds.
+    """
     conn = get_connection(); cur = conn.cursor()
     if start_date and end_date:
         cur.execute("""
@@ -245,9 +254,6 @@ def fetch_user_inactive_history(user_id, start_date=None, end_date=None, limit=3
 # Overtime
 # -----------------------------
 def insert_overtime(user_id, ot_date, seconds):
-    """
-    Add to a user's overtime for a given date (upsert accumulation).
-    """
     conn = get_connection(); cur = conn.cursor()
     cur.execute("""
       INSERT INTO user_overtimes (user_id, ot_date, overtime_seconds)
@@ -256,13 +262,31 @@ def insert_overtime(user_id, ot_date, seconds):
     """, (user_id, ot_date, seconds))
     conn.commit(); cur.close(); conn.close()
 
+def fetch_overtime_sum(user_id, start_date=None, end_date=None):
+    """
+    Sum overtime_seconds for a user between dates (inclusive).
+    """
+    conn = get_connection(); cur = conn.cursor()
+    if start_date and end_date:
+        cur.execute("""
+          SELECT COALESCE(SUM(overtime_seconds),0) AS total
+          FROM user_overtimes
+          WHERE user_id=%s AND ot_date BETWEEN %s AND %s
+        """, (user_id, start_date, end_date))
+    else:
+        cur.execute("""
+          SELECT COALESCE(SUM(overtime_seconds),0) AS total
+          FROM user_overtimes
+          WHERE user_id=%s
+        """, (user_id,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    return int(row["total"] if row and row.get("total") is not None else 0)
+
 # -----------------------------
-# Media (URL-based)
+# Media
 # -----------------------------
 def insert_screenshot_url(user_id, image_bytes, event_id=None, mime="image/png"):
-    """
-    Save PNG to disk and record URL in DB.
-    """
     _ensure_media_dirs()
     name = f"{_now_stamp()}_{uuid.uuid4().hex}.png"
     relpath = os.path.join("screenshots", name)
@@ -280,9 +304,6 @@ def insert_screenshot_url(user_id, image_bytes, event_id=None, mime="image/png")
     return sid, url
 
 def insert_recording_url(user_id, video_bytes, duration_seconds, event_id=None, mime="video/mp4"):
-    """
-    Save MP4 to disk and record URL in DB.
-    """
     _ensure_media_dirs()
     name = f"{_now_stamp()}_{uuid.uuid4().hex}.mp4"
     relpath = os.path.join("recordings", name)
@@ -318,21 +339,13 @@ def fetch_recordings_for_user(user_id, limit=20):
     return rows
 
 # -----------------------------
-# Admin emails (fan-out)
+# Admin emails
 # -----------------------------
 def list_admin_emails():
     conn = get_connection(); cur = conn.cursor()
     try:
         cur.execute("SELECT email FROM users WHERE role='admin' AND email IS NOT NULL AND email <> ''")
         rows = cur.fetchall()
-        emails = []
-        for r in rows:
-            if isinstance(r, dict):
-                em = r.get("email")
-            else:
-                em = r[0] if len(r) > 0 else None
-            if em:
-                emails.append(em)
-        return emails
+        return [ (r.get("email") if isinstance(r, dict) else (r[0] if r else None)) for r in rows if r ]
     finally:
         cur.close(); conn.close()
