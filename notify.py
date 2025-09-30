@@ -1,18 +1,37 @@
 import smtplib
 from email.message import EmailMessage
 from backend.config import SMTP_CONFIG
+import socket
 
 def send_email(to_addrs, subject, body):
-    if isinstance(to_addrs, str):
-        to_addrs = [to_addrs]
-    msg = EmailMessage()
-    msg["From"] = SMTP_CONFIG["from_addr"]
-    msg["To"] = ", ".join(to_addrs)
-    msg["Subject"] = subject
-    msg.set_content(body)
+    """
+    Sends email with a socket timeout.
+    If sending fails or stalls, we swallow the error so the UI never freezes.
+    """
+    try:
+        if isinstance(to_addrs, str):
+            to_addrs = [to_addrs]
+        msg = EmailMessage()
+        msg["From"] = SMTP_CONFIG["from_addr"]
+        msg["To"] = ", ".join(to_addrs)
+        msg["Subject"] = subject
+        msg.set_content(body)
 
-    with smtplib.SMTP(SMTP_CONFIG["host"], SMTP_CONFIG["port"]) as server:
-        if SMTP_CONFIG.get("use_tls", True):
-            server.starttls()
-        server.login(SMTP_CONFIG["username"], SMTP_CONFIG["password"])
-        server.send_message(msg)
+        timeout = float(SMTP_CONFIG.get("timeout", 6))  # seconds
+        with smtplib.SMTP(SMTP_CONFIG["host"], SMTP_CONFIG["port"], timeout=timeout) as server:
+            if SMTP_CONFIG.get("use_tls", True):
+                # Some MTAs need ehlo before/after starttls
+                try:
+                    server.ehlo()
+                except Exception:
+                    pass
+                server.starttls()
+                try:
+                    server.ehlo()
+                except Exception:
+                    pass
+            server.login(SMTP_CONFIG["username"], SMTP_CONFIG["password"])
+            server.send_message(msg)
+    except (socket.timeout, smtplib.SMTPException, OSError):
+        # Log in your main app if you want, but never raise (avoid UI freeze)
+        pass
