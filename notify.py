@@ -3,6 +3,7 @@ from email.message import EmailMessage
 from backend.config import SMTP_CONFIG
 import socket
 
+
 def send_email(to_addrs, subject, body):
     """
     Sends email with a socket timeout.
@@ -17,10 +18,9 @@ def send_email(to_addrs, subject, body):
         msg["Subject"] = subject
         msg.set_content(body)
 
-        timeout = float(SMTP_CONFIG.get("timeout", 6))  # seconds
+        timeout = float(SMTP_CONFIG.get("timeout", 6))
         with smtplib.SMTP(SMTP_CONFIG["host"], SMTP_CONFIG["port"], timeout=timeout) as server:
             if SMTP_CONFIG.get("use_tls", True):
-                # Some MTAs need ehlo before/after starttls
                 try:
                     server.ehlo()
                 except Exception:
@@ -33,5 +33,4 @@ def send_email(to_addrs, subject, body):
             server.login(SMTP_CONFIG["username"], SMTP_CONFIG["password"])
             server.send_message(msg)
     except (socket.timeout, smtplib.SMTPException, OSError):
-        # Log in your main app if you want, but never raise (avoid UI freeze)
         pass

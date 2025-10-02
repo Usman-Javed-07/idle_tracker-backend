@@ -2,6 +2,7 @@ import pymysql
 from pymysql.cursors import DictCursor
 from backend.config import DB_CONFIG
 
+
 def get_connection():
     return pymysql.connect(
         host=DB_CONFIG["host"],

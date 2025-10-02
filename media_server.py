@@ -4,6 +4,7 @@ from backend.config import MEDIA_ROOT
 
 app = Flask(__name__)
 
+
 @app.get("/media/<path:relpath>")
 def serve_media(relpath):
     # Only serve files beneath MEDIA_ROOT
@@ -16,6 +17,7 @@ def serve_media(relpath):
     if not os.path.exists(full_path):
         abort(404)
     return send_from_directory(directory, filename)
+
 
 if __name__ == "__main__":
     os.makedirs(MEDIA_ROOT, exist_ok=True)

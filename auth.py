@@ -1,20 +1,25 @@
-# backend/auth.py
 import bcrypt
 from datetime import datetime, timedelta
 
 from backend.models import insert_user, get_user_by_username_or_email
 
 # ---------- password helpers ----------
+
+
 def hash_password(plain: str) -> bytes:
     return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt())
+
 
 def verify_password(plain: str, hashed: bytes) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed)
 
 # ---------- shift helpers ----------
+
+
 def _as_dt(hms: str) -> datetime:
     t = datetime.strptime(hms, "%H:%M:%S").time()
     return datetime(2000, 1, 1, t.hour, t.minute, t.second)
+
 
 def _duration_seconds(shift_start_time: str, shift_end_time: str) -> int:
     """Seconds between start and end on a 24h clock. If end <= start, roll to next day."""
@@ -25,6 +30,8 @@ def _duration_seconds(shift_start_time: str, shift_end_time: str) -> int:
     return int((end_dt - start_dt).total_seconds())
 
 # ---------- admin create/login ----------
+
+
 def admin_create_user(
     username: str,
     name: str,
@@ -57,6 +64,7 @@ def admin_create_user(
         shift_end_time=shift_end_time,
         shift_duration_seconds=duration,
     )
+
 
 def login(login_text: str, password: str):
     user = get_user_by_username_or_email(login_text)
