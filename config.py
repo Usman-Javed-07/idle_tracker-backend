@@ -33,6 +33,7 @@ SMTP_CONFIG = {
 MEDIA_ROOT = os.getenv("MEDIA_ROOT", os.path.join(os.getcwd(), "media"))
 MEDIA_SCREENSHOTS_DIR = os.path.join(MEDIA_ROOT, "screenshots")
 MEDIA_RECORDINGS_DIR = os.path.join(MEDIA_ROOT, "recordings")
+MEDIA_AVATARS_DIR = os.path.join(MEDIA_ROOT, "avatars")
 
 # Public URL base for the Flask static server below
 MEDIA_BASE_URL = os.getenv("MEDIA_BASE_URL", "http://127.0.0.1:5000/media")
