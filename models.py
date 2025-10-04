@@ -9,6 +9,8 @@ from backend.config import (
 )
 
 # Helpers
+
+
 def _has_column(table: str, column: str) -> bool:
     conn = get_connection()
     cur = conn.cursor()
@@ -18,15 +20,19 @@ def _has_column(table: str, column: str) -> bool:
     conn.close()
     return ok
 
+
 def _ensure_media_dirs():
     os.makedirs(MEDIA_SCREENSHOTS_DIR, exist_ok=True)
     os.makedirs(MEDIA_RECORDINGS_DIR, exist_ok=True)
     os.makedirs(MEDIA_AVATARS_DIR, exist_ok=True)  # NEW
 
+
 def _now_stamp():
     return dt.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # Schema / Migrations
+
+
 def init_tables():
     conn = get_connection()
     cur = conn.cursor()
@@ -48,7 +54,8 @@ def init_tables():
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB;""")
     if not _has_column("users", "shift_end_time"):
-        cur.execute("ALTER TABLE users ADD COLUMN shift_end_time TIME NOT NULL DEFAULT '18:00:00'")
+        cur.execute(
+            "ALTER TABLE users ADD COLUMN shift_end_time TIME NOT NULL DEFAULT '18:00:00'")
     # NEW: image_url column
     if not _has_column("users", "image_url"):
         cur.execute("ALTER TABLE users ADD COLUMN image_url TEXT NULL")
@@ -112,6 +119,8 @@ def init_tables():
     conn.close()
 
 # Users
+
+
 def insert_user(username, name, department, email, password_hash,
                 role="user",
                 shift_start_time="09:00:00",
@@ -129,6 +138,7 @@ def insert_user(username, name, department, email, password_hash,
     cur.close()
     conn.close()
     return uid
+
 
 def admin_update_user(user_id, **fields):
     if not fields:
@@ -150,6 +160,7 @@ def admin_update_user(user_id, **fields):
     cur.close()
     conn.close()
 
+
 def admin_delete_user(user_id):
     # also attempt to delete avatar file
     try:
@@ -165,14 +176,17 @@ def admin_delete_user(user_id):
     cur.close()
     conn.close()
 
+
 def get_user_by_username_or_email(login):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE username=%s OR email=%s LIMIT 1", (login, login))
+    cur.execute(
+        "SELECT * FROM users WHERE username=%s OR email=%s LIMIT 1", (login, login))
     row = cur.fetchone()
     cur.close()
     conn.close()
     return row
+
 
 def get_user_by_id(user_id):
     conn = get_connection()
@@ -182,6 +196,7 @@ def get_user_by_id(user_id):
     cur.close()
     conn.close()
     return row
+
 
 def list_users(search=None, status=None, hide_admin=True):
     """
@@ -195,7 +210,8 @@ def list_users(search=None, status=None, hide_admin=True):
     if hide_admin:
         clauses.append("role <> 'admin'")
     if search:
-        clauses.append("(username LIKE %s OR name LIKE %s OR department LIKE %s OR email LIKE %s)")
+        clauses.append(
+            "(username LIKE %s OR name LIKE %s OR department LIKE %s OR email LIKE %s)")
         like = f"%{search}%"
         vals.extend([like, like, like, like])
     if status and status in {"off", "shift_start", "active", "inactive"}:
@@ -214,14 +230,18 @@ def list_users(search=None, status=None, hide_admin=True):
     conn.close()
     return rows
 
+
 def update_user_status(user_id, status):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("UPDATE users SET status=%s, last_status_change=NOW() WHERE id=%s", (status, user_id))
+    cur.execute(
+        "UPDATE users SET status=%s, last_status_change=NOW() WHERE id=%s", (status, user_id))
     cur.close()
     conn.close()
 
 # Events & History
+
+
 def record_event(user_id, event_type, active_duration_seconds=None, notified=0):
     conn = get_connection()
     cur = conn.cursor()
@@ -233,6 +253,7 @@ def record_event(user_id, event_type, active_duration_seconds=None, notified=0):
     cur.close()
     conn.close()
     return eid
+
 
 def fetch_unnotified_inactive_events():
     conn = get_connection()
@@ -250,6 +271,7 @@ def fetch_unnotified_inactive_events():
     conn.close()
     return rows
 
+
 def mark_event_notified(event_id):
     conn = get_connection()
     cur = conn.cursor()
@@ -257,36 +279,40 @@ def mark_event_notified(event_id):
     cur.close()
     conn.close()
 
+
 def fetch_user_inactive_history(user_id, start_date=None, end_date=None, limit=500):
+    """
+    Returns BOTH 'inactive' and 'active' events for a user, newest first.
+    - 'inactive' rows carry the length of the *active* streak that just ended.
+    - 'active'   rows carry the length of the *inactive* streak that just ended.
+    This allows the UI to sum true Active vs Inactive durations correctly.
+    """
     conn = get_connection()
     cur = conn.cursor()
+    base = """
+        SELECT ae.id, u.username, u.email, ae.event_type, ae.occurred_at, ae.notified,
+               ae.active_duration_seconds
+        FROM activity_events ae
+        JOIN users u ON u.id = ae.user_id
+        WHERE ae.user_id=%s
+          AND ae.event_type IN ('inactive','active')
+    """
+    params = [user_id]
     if start_date and end_date:
-        cur.execute("""
-            SELECT ae.id, u.username, u.email, ae.event_type, ae.occurred_at, ae.notified,
-                   ae.active_duration_seconds
-            FROM activity_events ae
-            JOIN users u ON u.id = ae.user_id
-            WHERE ae.user_id=%s AND ae.event_type='inactive'
-              AND DATE(ae.occurred_at) BETWEEN %s AND %s
-            ORDER BY ae.occurred_at DESC
-            LIMIT %s
-        """, (user_id, start_date, end_date, limit))
-    else:
-        cur.execute("""
-            SELECT ae.id, u.username, u.email, ae.event_type, ae.occurred_at, ae.notified,
-                   ae.active_duration_seconds
-            FROM activity_events ae
-            JOIN users u ON u.id = ae.user_id
-            WHERE ae.user_id=%s AND ae.event_type='inactive'
-            ORDER BY ae.occurred_at DESC
-            LIMIT %s
-        """, (user_id, limit))
+        base += " AND DATE(ae.occurred_at) BETWEEN %s AND %s"
+        params += [start_date, end_date]
+    base += " ORDER BY ae.occurred_at DESC LIMIT %s"
+    params.append(limit)
+
+    cur.execute(base, tuple(params))
     rows = cur.fetchall()
     cur.close()
     conn.close()
     return rows
 
 # Overtime
+
+
 def insert_overtime(user_id, ot_date, seconds):
     conn = get_connection()
     cur = conn.cursor()
@@ -298,6 +324,7 @@ def insert_overtime(user_id, ot_date, seconds):
     conn.commit()
     cur.close()
     conn.close()
+
 
 def fetch_overtime_sum(user_id, start_date=None, end_date=None):
     conn = get_connection()
@@ -319,7 +346,9 @@ def fetch_overtime_sum(user_id, start_date=None, end_date=None):
     conn.close()
     return int(row["total"] if row and row.get("total") is not None else 0)
 
-# Media (screenshots/recordings)
+# Media (screenshots/recordings) ... (unchanged below)
+
+
 def insert_screenshot_url(user_id, image_bytes, event_id=None, mime="image/png"):
     _ensure_media_dirs()
     name = f"{_now_stamp()}_{uuid.uuid4().hex}.png"
@@ -338,6 +367,7 @@ def insert_screenshot_url(user_id, image_bytes, event_id=None, mime="image/png")
     cur.close()
     conn.close()
     return sid, url
+
 
 def insert_recording_url(user_id, video_bytes, duration_seconds, event_id=None, mime="video/mp4"):
     _ensure_media_dirs()
@@ -358,6 +388,7 @@ def insert_recording_url(user_id, video_bytes, duration_seconds, event_id=None, 
     conn.close()
     return rid, url
 
+
 def fetch_screenshots_for_user(user_id, limit=50):
     conn = get_connection()
     cur = conn.cursor()
@@ -369,6 +400,7 @@ def fetch_screenshots_for_user(user_id, limit=50):
     cur.close()
     conn.close()
     return rows
+
 
 def fetch_recordings_for_user(user_id, limit=20):
     conn = get_connection()
@@ -382,12 +414,13 @@ def fetch_recordings_for_user(user_id, limit=20):
     conn.close()
     return rows
 
-# Admin emails
+
 def list_admin_emails():
     conn = get_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT email FROM users WHERE role='admin' AND email IS NOT NULL AND email <> ''")
+        cur.execute(
+            "SELECT email FROM users WHERE role='admin' AND email IS NOT NULL AND email <> ''")
         rows = cur.fetchall()
         return [(r.get("email") if isinstance(r, dict) else (r[0] if r else None)) for r in rows if r]
     finally:
@@ -395,6 +428,8 @@ def list_admin_emails():
         conn.close()
 
 # ===== Avatars (NEW) =====
+
+
 def save_user_avatar_from_path(user_id: int, file_path: str) -> str:
     """
     Copies the given image file into MEDIA_AVATARS_DIR with a unique name,
@@ -414,6 +449,7 @@ def save_user_avatar_from_path(user_id: int, file_path: str) -> str:
     admin_update_user(user_id, image_url=url)
     return url
 
+
 def _try_delete_avatar_by_url(url: str):
     """Best-effort: delete the underlying file if it's inside MEDIA_ROOT/avatars."""
     try:
@@ -430,6 +466,7 @@ def _try_delete_avatar_by_url(url: str):
                 os.remove(full)
     except Exception:
         pass
+
 
 def remove_user_avatar(user_id: int):
     """Sets users.image_url=NULL and removes old file if it lived under avatars/."""
